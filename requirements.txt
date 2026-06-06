@@ -1,0 +1,10 @@
+# ── ChromaDB 1.x — compatible with NumPy 2.x and Python 3.14 ──
+chromadb>=1.0.0
+
+# ── Core stack ──
+streamlit>=1.35.0
+pypdf>=4.0.0
+langchain-text-splitters>=0.2.0
+sentence-transformers>=2.7.0
+groq>=0.9.0
+numpy>=1.26.0
