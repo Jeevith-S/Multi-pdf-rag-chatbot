@@ -339,6 +339,32 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif !important; }
   text-align: center; font-size: 11px; color: #1e1e1e; margin-top: 8px;
 }
 
+/* ── inline uploader: hide everything, show only clean button ── */
+.block-container [data-testid="stFileUploader"] {
+  background: transparent !important; border: none !important;
+}
+.block-container [data-testid="stFileUploader"] section {
+  padding: 0 !important; min-height: unset !important; background: transparent !important; border: none !important;
+}
+.block-container [data-testid="stFileUploader"] section > div { padding: 0 !important; }
+.block-container [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzoneInstructions"] { display:none !important; }
+.block-container [data-testid="stFileUploader"] small { display:none !important; }
+/* the Browse button becomes the + icon */
+.block-container [data-testid="stFileUploader"] button {
+  background: #1a1a1a !important;
+  border: 1px solid #2a2a2a !important;
+  border-radius: 10px !important;
+  color: #888 !important;
+  width: 48px !important; height: 48px !important;
+  min-height: unset !important; padding: 0 !important;
+  font-size: 20px !important;
+  transition: background .15s, border-color .15s, color .15s !important;
+}
+.block-container [data-testid="stFileUploader"] button:hover {
+  background: #222 !important; border-color: #19c37d !important; color: #19c37d !important;
+}
+.block-container [data-testid="stFileUploader"] label { display:none !important; }
+
 /* streamlit success */
 .stSuccess { background: #061410 !important; border-left-color: #19c37d !important;
              color: #19c37d !important; border-radius: 8px !important; font-size: 13px !important; }
@@ -558,9 +584,10 @@ else:
               </div>
             </div>""", unsafe_allow_html=True)
 
-# Input bar
+# ── INPUT BAR ─────────────────────────────────────────────────────────
 st.markdown('<div class="input-bar"><div class="input-center">', unsafe_allow_html=True)
 
+# Active docs strip
 if st.session_state.indexed:
     docs_str = "  ·  ".join(st.session_state.indexed_files)
     st.markdown(f"""
@@ -568,23 +595,57 @@ if st.session_state.indexed:
       <span class="ad-dot"></span>{docs_str}
     </div>""", unsafe_allow_html=True)
 
-qc, bc = st.columns([12, 1])
-with qc:
-    question = st.text_input("q",
-        placeholder="Ask anything about your documents…" if st.session_state.indexed else "Upload and index PDFs first…",
+# Three columns: upload | text input | send
+uc, qc, bc = st.columns([1.2, 11, 1.2])
+
+with uc:
+    inline_upload = st.file_uploader(
+        "add",
+        type=["pdf"],
+        accept_multiple_files=True,
         label_visibility="collapsed",
-        disabled=not st.session_state.indexed)
+        key="inline_uploader",
+    )
+
+with qc:
+    question = st.text_input(
+        "q",
+        placeholder="Upload a PDF and ask anything…",
+        label_visibility="collapsed",
+    )
+
 with bc:
-    ask = st.button("➤", disabled=not st.session_state.indexed)
+    ask = st.button("➤", disabled=(not question.strip()))
 
 st.markdown('<div class="input-hint">Study Buddy AI · answers sourced from your documents only</div>', unsafe_allow_html=True)
 st.markdown('</div></div>', unsafe_allow_html=True)
 
-# Handle ask
-if ask and question.strip():
-    st.session_state.chat_history.append({"role": "user", "content": question})
-    with st.spinner(""):
-        res  = retrieve(question, st.session_state.embed_model, st.session_state.collection)
-        ans, srcs = answer(question, res)
-    st.session_state.chat_history.append({"role":"assistant","content":ans,"sources":srcs})
+# ── Auto-process when files uploaded via inline uploader ──────────────
+if inline_upload:
+    prog = st.progress(0, text="Reading PDFs…")
+    docs   = extract_text_from_pdfs(inline_upload);  prog.progress(20, text="Chunking…")
+    chunks = chunk_documents(docs);                   prog.progress(40, text="Loading model…")
+    m      = load_embedding_model();                  prog.progress(60, text="Embedding…")
+    embs   = embed(chunks, m);                        prog.progress(80, text="Storing…")
+    col_db = get_chroma_collection()
+    n      = store(chunks, embs, col_db);             prog.progress(100, text="Done!")
+    st.session_state.update({
+        "collection": col_db, "embed_model": m,
+        "indexed": True, "num_chunks": n,
+        "indexed_files": [f.name for f in inline_upload],
+        "chat_history": [],
+    })
+    prog.empty()
     st.rerun()
+
+# ── Handle ask ────────────────────────────────────────────────────────
+if ask and question.strip():
+    if not st.session_state.indexed:
+        st.warning("Upload and process a PDF first using the 📎 button on the left of the input.")
+    else:
+        st.session_state.chat_history.append({"role": "user", "content": question})
+        with st.spinner(""):
+            res       = retrieve(question, st.session_state.embed_model, st.session_state.collection)
+            ans, srcs = answer(question, res)
+        st.session_state.chat_history.append({"role": "assistant", "content": ans, "sources": srcs})
+        st.rerun()
